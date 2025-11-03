@@ -24,7 +24,7 @@ const ChatPage = () => {
   ]);
   const [input, setInput] = useState("");
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
 
     const userMessage: Message = {
@@ -34,25 +34,46 @@ const ChatPage = () => {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    setInput("");
 
-    // Mock AI response
-    setTimeout(() => {
-      const responses = [
-        "That's a great question! Based on current medical research, I recommend consulting with a healthcare professional for personalized advice.",
-        "I understand your concern. Here are some general suggestions that might help...",
-        "For more detailed information about this topic, I'd suggest checking our health resources section or speaking with a gynecologist.",
-      ];
+    // Call OpenAI API
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful health assistant for women. Provide supportive, informative responses about menstrual health, PCOS, menopause, and general wellness. Always recommend consulting healthcare professionals for medical advice.',
+            },
+            ...messages.map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: input },
+          ],
+        }),
+      });
+
+      const data = await response.json();
       
       const assistantMessage: Message = {
         role: "assistant",
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: data.choices?.[0]?.message?.content || "I apologize, I'm having trouble responding right now. Please try again.",
         timestamp: new Date(),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-    }, 1000);
-
-    setInput("");
+    } catch (error) {
+      const errorMessage: Message = {
+        role: "assistant",
+        content: "I'm sorry, I'm having trouble connecting. Please check your API configuration and try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
   };
 
   return (

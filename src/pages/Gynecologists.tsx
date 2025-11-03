@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardHeader from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
@@ -6,12 +6,13 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Search, MapPin, Phone, Star, Clock } from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
 
 const Gynecologists = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
-
-  const doctors = [
+  const [doctors, setDoctors] = useState([
     {
       name: "Dr. Priya Sharma",
       specialization: "Obstetrics & Gynecology",
@@ -60,7 +61,61 @@ const Gynecologists = () => {
       fees: "₹1000",
       image: "👩‍⚕️",
     },
-  ];
+  ]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // Fetch nearby doctors using Google Places API when component mounts
+    const fetchNearbyDoctors = async () => {
+      if (!import.meta.env.VITE_GOOGLE_MAPS_API_KEY) {
+        return; // Use mock data if no API key
+      }
+
+      try {
+        setLoading(true);
+        // Get user location
+        navigator.geolocation.getCurrentPosition(async (position) => {
+          const { latitude, longitude } = position.coords;
+          
+          const response = await fetch(
+            `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=5000&type=doctor&keyword=gynecologist&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`
+          );
+          
+          const data = await response.json();
+          
+          if (data.results) {
+            const formattedDoctors = data.results.slice(0, 10).map((place: any) => ({
+              name: place.name,
+              specialization: "Gynecology",
+              experience: "Verified",
+              rating: place.rating || 4.5,
+              reviews: place.user_ratings_total || 0,
+              location: place.vicinity,
+              distance: "Nearby",
+              availability: "Call to confirm",
+              fees: "Contact for details",
+              image: "👩‍⚕️",
+            }));
+            
+            setDoctors(formattedDoctors);
+          }
+          setLoading(false);
+        }, () => {
+          setLoading(false);
+          toast({
+            title: "Location access denied",
+            description: "Using default doctor list",
+            variant: "default",
+          });
+        });
+      } catch (error) {
+        setLoading(false);
+        console.error("Error fetching doctors:", error);
+      }
+    };
+
+    fetchNearbyDoctors();
+  }, [toast]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50">

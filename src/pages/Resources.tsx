@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardHeader from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,24 @@ import { ArrowLeft, Search, BookOpen, Video, Newspaper, Heart } from "lucide-rea
 const Resources = () => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
+  const [news, setNews] = useState([
+    {
+      title: "New Study: Exercise Reduces PCOS Symptoms by 40%",
+      source: "Women's Health Journal",
+      date: "2 days ago",
+    },
+    {
+      title: "Government Launches Free Menstrual Health Program",
+      source: "Ministry of Health",
+      date: "1 week ago",
+    },
+    {
+      title: "Breakthrough in Menopause Treatment Research",
+      source: "Medical News Today",
+      date: "3 days ago",
+    },
+  ]);
+  const [loading, setLoading] = useState(false);
 
   const articles = [
     {
@@ -64,23 +82,39 @@ const Resources = () => {
     },
   ];
 
-  const news = [
-    {
-      title: "New Study: Exercise Reduces PCOS Symptoms by 40%",
-      source: "Women's Health Journal",
-      date: "2 days ago",
-    },
-    {
-      title: "Government Launches Free Menstrual Health Program",
-      source: "Ministry of Health",
-      date: "1 week ago",
-    },
-    {
-      title: "Breakthrough in Menopause Treatment Research",
-      source: "Medical News Today",
-      date: "3 days ago",
-    },
-  ];
+  useEffect(() => {
+    // Fetch latest health news from News API
+    const fetchNews = async () => {
+      if (!import.meta.env.VITE_NEWS_API_KEY) {
+        return; // Use mock data if no API key
+      }
+
+      try {
+        setLoading(true);
+        const response = await fetch(
+          `https://newsapi.org/v2/everything?q=women+health+OR+menstrual+OR+PCOS+OR+menopause&sortBy=publishedAt&language=en&pageSize=10&apiKey=${import.meta.env.VITE_NEWS_API_KEY}`
+        );
+        
+        const data = await response.json();
+        
+        if (data.articles) {
+          const formattedNews = data.articles.map((article: any) => ({
+            title: article.title,
+            source: article.source.name,
+            date: new Date(article.publishedAt).toLocaleDateString(),
+          }));
+          
+          setNews(formattedNews);
+        }
+        setLoading(false);
+      } catch (error) {
+        setLoading(false);
+        console.error("Error fetching news:", error);
+      }
+    };
+
+    fetchNews();
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50">
