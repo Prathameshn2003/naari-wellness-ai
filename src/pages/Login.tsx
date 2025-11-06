@@ -4,34 +4,58 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import logo from "@/assets/naaricare-logo.png";
-import { Heart, Sparkles } from "lucide-react";
+import { Heart, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { z } from "zod";
+import { apiService } from "@/services/api.service";
+
+const loginSchema = z.object({
+  email: z.string().trim().email({ message: "Invalid email address" }).max(255),
+  password: z.string().min(6, { message: "Password must be at least 6 characters" }).max(100),
+});
 
 const Login = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Simple validation
-    if (!email || !password) {
-      toast.error("Please fill in all fields");
+    // Validate inputs
+    const validation = loginSchema.safeParse({ email, password });
+    if (!validation.success) {
+      toast.error(validation.error.errors[0].message);
       return;
     }
 
-    // Mock login - in production, connect to backend
-    toast.success(isAdmin ? "Admin login successful!" : "Welcome back!");
-    
-    // Store auth state (mock)
-    localStorage.setItem("isAuthenticated", "true");
-    localStorage.setItem("userRole", isAdmin ? "admin" : "user");
-    
-    navigate("/dashboard");
+    setIsLoading(true);
+
+    try {
+      const response = await apiService.auth.login(email, password);
+      
+      if (response.token) {
+        // Store JWT token
+        localStorage.setItem("authToken", response.token);
+        localStorage.setItem("userId", response.userId);
+        localStorage.setItem("userEmail", response.email);
+        if (response.name) {
+          localStorage.setItem("userName", response.name);
+        }
+
+        toast.success("Welcome back!");
+        navigate("/dashboard");
+      } else {
+        toast.error("Login failed. Please try again.");
+      }
+    } catch (error: any) {
+      const errorMessage = error.message || "Login failed. Please check your credentials.";
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -76,20 +100,22 @@ const Login = () => {
             />
           </div>
 
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="admin"
-              checked={isAdmin}
-              onCheckedChange={(checked) => setIsAdmin(checked as boolean)}
-            />
-            <Label htmlFor="admin" className="text-sm cursor-pointer">
-              Login as Admin
-            </Label>
-          </div>
-
-          <Button type="submit" className="w-full gradient-primary hover:shadow-glow transition-all">
-            <Sparkles className="mr-2 h-4 w-4" />
-            Sign In
+          <Button 
+            type="submit" 
+            className="w-full gradient-primary hover:shadow-glow transition-all"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Signing In...
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Sign In
+              </>
+            )}
           </Button>
 
           <div className="text-center space-y-2">

@@ -6,8 +6,17 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import logo from "@/assets/naaricare-logo.png";
-import { UserPlus, Sparkles } from "lucide-react";
+import { UserPlus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { z } from "zod";
+import { apiService } from "@/services/api.service";
+
+const signupSchema = z.object({
+  name: z.string().trim().min(2, { message: "Name must be at least 2 characters" }).max(100),
+  email: z.string().trim().email({ message: "Invalid email address" }).max(255),
+  password: z.string().min(6, { message: "Password must be at least 6 characters" }).max(100),
+  dateOfBirth: z.string().refine(val => !isNaN(Date.parse(val)), { message: "Invalid date" }),
+});
 
 const Signup = () => {
   const navigate = useNavigate();
@@ -16,20 +25,21 @@ const Signup = () => {
     email: "",
     password: "",
     confirmPassword: "",
-    age: "",
-    isAdmin: false,
+    dateOfBirth: "",
+    location: "",
     acceptTerms: false,
   });
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
-    if (!formData.name || !formData.email || !formData.password || !formData.age) {
+    // Basic validation
+    if (!formData.name || !formData.email || !formData.password || !formData.dateOfBirth) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -44,14 +54,48 @@ const Signup = () => {
       return;
     }
 
-    // Mock signup - in production, connect to backend
-    toast.success("Account created successfully!");
-    
-    // Store auth state (mock)
-    localStorage.setItem("isAuthenticated", "true");
-    localStorage.setItem("userRole", formData.isAdmin ? "admin" : "user");
-    
-    navigate("/dashboard");
+    // Validate inputs with zod
+    const validation = signupSchema.safeParse({
+      name: formData.name,
+      email: formData.email,
+      password: formData.password,
+      dateOfBirth: formData.dateOfBirth,
+    });
+
+    if (!validation.success) {
+      toast.error(validation.error.errors[0].message);
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const response = await apiService.auth.signup({
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        dateOfBirth: formData.dateOfBirth,
+        location: formData.location || undefined,
+      });
+
+      if (response.token) {
+        // Store JWT token
+        localStorage.setItem("authToken", response.token);
+        localStorage.setItem("userId", response.userId);
+        localStorage.setItem("userEmail", response.email);
+        localStorage.setItem("userName", response.name);
+
+        toast.success("Account created successfully!");
+        navigate("/dashboard");
+      } else {
+        toast.error("Signup failed. Please try again.");
+      }
+    } catch (error: any) {
+      const errorMessage = error.message || "Signup failed. Please try again.";
+      toast.error(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -126,27 +170,27 @@ const Signup = () => {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="age">Age *</Label>
+            <Label htmlFor="dateOfBirth">Date of Birth *</Label>
             <Input
-              id="age"
-              name="age"
-              type="number"
-              placeholder="Enter your age"
-              value={formData.age}
+              id="dateOfBirth"
+              name="dateOfBirth"
+              type="date"
+              value={formData.dateOfBirth}
               onChange={handleChange}
               className="bg-white/50"
             />
           </div>
 
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="isAdmin"
-              checked={formData.isAdmin}
-              onCheckedChange={(checked) => setFormData({ ...formData, isAdmin: checked as boolean })}
+          <div className="space-y-2">
+            <Label htmlFor="location">Location (Optional)</Label>
+            <Input
+              id="location"
+              name="location"
+              placeholder="City, State"
+              value={formData.location}
+              onChange={handleChange}
+              className="bg-white/50"
             />
-            <Label htmlFor="isAdmin" className="text-sm cursor-pointer">
-              Register as Admin
-            </Label>
           </div>
 
           <div className="flex items-center space-x-2">
@@ -160,9 +204,22 @@ const Signup = () => {
             </Label>
           </div>
 
-          <Button type="submit" className="w-full gradient-primary hover:shadow-glow transition-all">
-            <UserPlus className="mr-2 h-4 w-4" />
-            Create Account
+          <Button 
+            type="submit" 
+            className="w-full gradient-primary hover:shadow-glow transition-all"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Creating Account...
+              </>
+            ) : (
+              <>
+                <UserPlus className="mr-2 h-4 w-4" />
+                Create Account
+              </>
+            )}
           </Button>
 
           <p className="text-center text-sm text-muted-foreground">

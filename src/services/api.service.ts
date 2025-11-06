@@ -33,7 +33,7 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
 
 // Auth API
 export const authAPI = {
-  signup: (data: { name: string; email: string; password: string; age: number; location?: string }) =>
+  signup: (data: { name: string; email: string; password: string; dateOfBirth: string; location?: string }) =>
     fetchAPI(ENDPOINTS.AUTH.SIGNUP, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -160,4 +160,16 @@ export const notificationsAPI = {
     fetchAPI(`${ENDPOINTS.NOTIFICATIONS}/${id}/ack`, {
       method: 'PUT',
     }),
+};
+
+// Combined API service
+export const apiService = {
+  auth: authAPI,
+  tracker: trackerAPI,
+  prediction: predictionAPI,
+  recommendation: recommendationAPI,
+  resources: resourcesAPI,
+  doctors: doctorsAPI,
+  chat: chatAPI,
+  notifications: notificationsAPI,
 };
