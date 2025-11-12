@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardHeader from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ArrowLeft, Send, Bot, User } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Message {
   role: "user" | "assistant";
@@ -23,9 +24,20 @@ const ChatPage = () => {
     },
   ]);
   const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+    }
+  }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
       role: "user",
@@ -35,44 +47,78 @@ const ChatPage = () => {
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setIsLoading(true);
 
-    // Call OpenAI API
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a helpful health assistant for women. Provide supportive, informative responses about menstrual health, PCOS, menopause, and general wellness. Always recommend consulting healthcare professionals for medical advice.',
-            },
-            ...messages.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: input },
-          ],
-        }),
+      const { data: functionData, error: functionError } = await supabase.functions.invoke('chat', {
+        body: { 
+          messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: input }]
+        }
       });
 
-      const data = await response.json();
-      
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: data.choices?.[0]?.message?.content || "I apologize, I'm having trouble responding right now. Please try again.",
-        timestamp: new Date(),
-      };
+      if (functionError) {
+        throw functionError;
+      }
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      // Handle streaming response
+      const reader = functionData.getReader();
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+
+      // Add empty assistant message that we'll update
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: "",
+        timestamp: new Date(),
+      }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices?.[0]?.delta?.content;
+              if (content) {
+                assistantContent += content;
+                setMessages((prev) => {
+                  const newMessages = [...prev];
+                  newMessages[newMessages.length - 1] = {
+                    role: "assistant",
+                    content: assistantContent,
+                    timestamp: new Date(),
+                  };
+                  return newMessages;
+                });
+              }
+            } catch (e) {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+
+      if (!assistantContent) {
+        throw new Error("No response from assistant");
+      }
     } catch (error) {
+      console.error('Chat error:', error);
       const errorMessage: Message = {
         role: "assistant",
-        content: "I'm sorry, I'm having trouble connecting. Please check your API configuration and try again.",
+        content: "I'm sorry, I'm having trouble connecting. Please try again.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -96,7 +142,7 @@ const ChatPage = () => {
             </div>
           </div>
 
-          <ScrollArea className="flex-1 pr-4 mb-4">
+          <ScrollArea className="flex-1 pr-4 mb-4" ref={scrollAreaRef}>
             <div className="space-y-4">
               {messages.map((message, index) => (
                 <div
@@ -140,7 +186,7 @@ const ChatPage = () => {
               placeholder="Type your message..."
               className="flex-1 bg-white/50"
             />
-            <Button onClick={handleSend} className="gradient-primary">
+            <Button onClick={handleSend} className="gradient-primary" disabled={isLoading}>
               <Send className="h-4 w-4" />
             </Button>
           </div>
