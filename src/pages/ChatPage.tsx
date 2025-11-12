@@ -50,20 +50,24 @@ const ChatPage = () => {
     setIsLoading(true);
 
     try {
-      const { data: functionData, error: functionError } = await supabase.functions.invoke('chat', {
-        body: { 
-          messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: input }]
+      // Use direct fetch for streaming support
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            messages: [...messages.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: input }]
+          }),
         }
-      });
+      );
 
-      if (functionError) {
-        throw functionError;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-
-      // Handle streaming response
-      const reader = functionData.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = "";
 
       // Add empty assistant message that we'll update
       setMessages((prev) => [...prev, {
@@ -72,16 +76,25 @@ const ChatPage = () => {
         timestamp: new Date(),
       }]);
 
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response body");
+      }
+
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
+        const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n');
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const data = line.slice(6);
+            const data = line.slice(6).trim();
             if (data === '[DONE]') continue;
 
             try {
