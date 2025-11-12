@@ -19,7 +19,7 @@ const ChatPage = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Hello! I'm your NaariCare health assistant. How can I help you today? You can ask me about menstrual health, PCOS, menopause, or general wellness questions.",
+      content: "Hello! I'm NaariCare AI, your intelligent health assistant powered by advanced natural language processing. I can understand your questions and provide personalized, real-time answers about menstrual health, PCOS, menopause, pregnancy, nutrition, fitness, and general wellness. How can I help you today?",
       timestamp: new Date(),
     },
   ]);
@@ -137,8 +137,8 @@ const ChatPage = () => {
               <Bot className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold gradient-text">AI Health Assistant</h1>
-              <p className="text-sm text-muted-foreground">Your 24/7 health companion</p>
+              <h1 className="text-2xl font-bold gradient-text">NaariCare AI Assistant</h1>
+              <p className="text-sm text-muted-foreground">Powered by advanced NLP • Real-time personalized responses</p>
             </div>
           </div>
 
@@ -192,7 +192,7 @@ const ChatPage = () => {
           </div>
 
           <p className="text-xs text-muted-foreground text-center mt-4">
-            This AI assistant provides general information only. Always consult healthcare professionals for medical advice.
+            🤖 Powered by Lovable AI with advanced NLP • This AI provides general information only • Always consult healthcare professionals for medical advice
           </p>
         </Card>
       </main>

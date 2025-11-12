@@ -14,26 +14,26 @@ serve(async (req) => {
 
   try {
     const { messages } = await req.json();
-    const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
 
-    if (!openAIApiKey) {
-      throw new Error('OpenAI API key not configured');
+    if (!lovableApiKey) {
+      throw new Error('Lovable AI key not configured');
     }
 
     console.log('Processing chat request with', messages.length, 'messages');
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openAIApiKey}`,
+        'Authorization': `Bearer ${lovableApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'google/gemini-2.5-flash',
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful health assistant for women. Provide supportive, informative responses about menstrual health, PCOS, menopause, and general wellness. Always recommend consulting healthcare professionals for medical advice.',
+            content: 'You are NaariCare AI, an expert health assistant specialized in women\'s health. Provide supportive, informative, and personalized responses about menstrual health, PCOS, menopause, pregnancy, nutrition, fitness, and general wellness. Use natural language processing to understand context and provide relevant, evidence-based answers. Always be empathetic and encourage consulting healthcare professionals for serious medical concerns. Keep responses conversational and easy to understand.',
           },
           ...messages,
         ],
@@ -43,8 +43,22 @@ serve(async (req) => {
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('OpenAI API error:', response.status, error);
-      throw new Error(`OpenAI API error: ${response.status}`);
+      console.error('Lovable AI error:', response.status, error);
+      
+      if (response.status === 429) {
+        return new Response(
+          JSON.stringify({ error: 'Rate limit exceeded. Please try again in a moment.' }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (response.status === 402) {
+        return new Response(
+          JSON.stringify({ error: 'AI service credits depleted. Please contact support.' }),
+          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      throw new Error(`AI service error: ${response.status}`);
     }
 
     // Return the streaming response
