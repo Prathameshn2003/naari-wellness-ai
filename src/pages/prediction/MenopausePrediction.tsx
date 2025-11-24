@@ -7,16 +7,19 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, ArrowRight, TrendingUp, AlertCircle, Check } from "lucide-react";
+import { ArrowLeft, ArrowRight, TrendingUp, AlertCircle, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Bar, Line } from "recharts";
 import { BarChart, LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { supabase } from "@/integrations/supabase/client";
 
 const MenopausePrediction = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState<"intro" | "questionnaire" | "results" | "recommendations">("intro");
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [predictionResults, setPredictionResults] = useState<any>(null);
 
   const questions = [
     { id: "age", question: "What is your current age?", type: "number", placeholder: "Enter your age" },
@@ -35,7 +38,7 @@ const MenopausePrediction = () => {
     setAnswers({ ...answers, [questions[currentQuestion].id]: value });
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (!answers[questions[currentQuestion].id]) {
       toast.error("Please answer the current question");
       return;
@@ -44,7 +47,36 @@ const MenopausePrediction = () => {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
     } else {
-      setStep("results");
+      // All questions answered, call backend API
+      setIsLoading(true);
+      try {
+        // Transform answers to match backend expectations
+        const transformedAnswers = {
+          age: answers.age,
+          irregularPeriods: answers.period_frequency === "Irregular" || answers.period_frequency === "Skipped some months" ? "yes" : "no",
+          hotFlashes: answers.hot_flashes === "Frequently" || answers.hot_flashes === "Very frequently" || answers.hot_flashes === "Sometimes" ? "yes" : "no",
+          moodChanges: answers.mood_changes === "Moderate" || answers.mood_changes === "Significant" ? "yes" : "no",
+          sleepProblems: answers.sleep_quality === "Poor" || answers.sleep_quality === "Very poor" || answers.sleep_quality === "Fair" ? "yes" : "no",
+          vaginalDryness: answers.vaginal_symptoms !== "No" ? "yes" : "no",
+          weightChanges: answers.weight_changes !== "No" && answers.weight_changes !== "Slight (1-5 kg)" ? "yes" : "no",
+          familyHistory: answers.bone_health === "Family history" ? "yes" : "no",
+        };
+
+        const { data, error } = await supabase.functions.invoke('predict-menopause', {
+          body: { answers: transformedAnswers }
+        });
+
+        if (error) throw error;
+
+        setPredictionResults(data);
+        setStep("results");
+        toast.success("Assessment completed successfully!");
+      } catch (error) {
+        console.error('Prediction error:', error);
+        toast.error("Failed to generate prediction. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -238,9 +270,18 @@ const MenopausePrediction = () => {
                     Previous
                   </Button>
                 )}
-                <Button onClick={handleNext} className="flex-1 gradient-primary" size="lg">
-                  {currentQuestion === questions.length - 1 ? "Get Results" : "Next"}
-                  <ArrowRight className="ml-2 h-4 w-4" />
+                <Button onClick={handleNext} className="flex-1 gradient-primary" size="lg" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      {currentQuestion === questions.length - 1 ? "Get Results" : "Next"}
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -251,8 +292,15 @@ const MenopausePrediction = () => {
   }
 
   if (step === "results") {
-    const predictedStage = "Perimenopause";
-    const confidence = 87;
+    if (!predictionResults) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      );
+    }
+
+    const { riskScore, riskLevel, stage, confidence, factors, symptomAnalysis } = predictionResults;
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50">
@@ -272,7 +320,7 @@ const MenopausePrediction = () => {
             <div className="grid md:grid-cols-3 gap-6 mb-8">
               <Card className="p-6 text-center border-primary">
                 <div className="text-sm font-medium text-muted-foreground mb-2">Predicted Stage</div>
-                <div className="text-3xl font-bold text-primary">{predictedStage}</div>
+                <div className="text-3xl font-bold text-primary">{stage}</div>
               </Card>
 
               <Card className="p-6 text-center border-secondary">
@@ -281,35 +329,35 @@ const MenopausePrediction = () => {
               </Card>
 
               <Card className="p-6 text-center border-accent">
-                <div className="text-sm font-medium text-muted-foreground mb-2">Age Range</div>
-                <div className="text-3xl font-bold text-accent">{answers.age} years</div>
+                <div className="text-sm font-medium text-muted-foreground mb-2">Risk Score</div>
+                <div className="text-3xl font-bold text-accent">{riskScore}%</div>
               </Card>
             </div>
 
             <div className="grid md:grid-cols-2 gap-6 mb-8">
               <Card className="p-6">
-                <h3 className="text-xl font-semibold mb-4">Stage Probabilities</h3>
+                <h3 className="text-xl font-semibold mb-4">Symptom Analysis</h3>
                 <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={stageData}>
+                  <BarChart data={symptomAnalysis}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="stage" tick={{ fill: '#64748b', fontSize: 11 }} />
+                    <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 11 }} angle={-15} textAnchor="end" height={80} />
                     <YAxis tick={{ fill: '#64748b' }} />
                     <Tooltip />
-                    <Bar dataKey="probability" fill="#c084fc" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="severity" fill="#c084fc" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
 
               <Card className="p-6">
-                <h3 className="text-xl font-semibold mb-4">Symptom Trend (Last 6 Months)</h3>
+                <h3 className="text-xl font-semibold mb-4">Contributing Factors</h3>
                 <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={symptomTrend}>
+                  <BarChart data={factors}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fill: '#64748b' }} />
+                    <XAxis dataKey="factor" tick={{ fill: '#64748b', fontSize: 11 }} angle={-15} textAnchor="end" height={80} />
                     <YAxis tick={{ fill: '#64748b' }} />
                     <Tooltip />
-                    <Line type="monotone" dataKey="severity" stroke="#ec4899" strokeWidth={3} dot={{ fill: '#ec4899', r: 5 }} />
-                  </LineChart>
+                    <Bar dataKey="score" fill="#ec4899" radius={[8, 8, 0, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               </Card>
             </div>
@@ -320,7 +368,7 @@ const MenopausePrediction = () => {
                 Understanding Your Results
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Your assessment indicates you are likely in the {predictedStage.toLowerCase()} stage. This is a natural transition 
+                Your assessment indicates you are likely in the {stage} stage. This is a natural transition 
                 that varies greatly among women. The symptoms you're experiencing are common during this phase. While some 
                 discomfort is normal, severe symptoms should be discussed with a healthcare provider.
               </p>
@@ -341,6 +389,24 @@ const MenopausePrediction = () => {
   }
 
   // Recommendations
+  const recommendations = predictionResults?.recommendations || {
+    dietary: [
+      'Increase calcium and vitamin D intake',
+      'Include soy products for natural phytoestrogens',
+      'Stay hydrated and limit caffeine',
+    ],
+    exercise: [
+      'Weight-bearing exercises for bone health',
+      'Regular cardiovascular exercise',
+      'Pelvic floor exercises',
+    ],
+    lifestyle: [
+      'Maintain a healthy sleep routine',
+      'Practice stress management techniques',
+      'Avoid smoking and limit alcohol',
+    ],
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50">
       <DashboardHeader />
@@ -365,77 +431,14 @@ const MenopausePrediction = () => {
                 Dietary Recommendations
               </h2>
               <Card className="p-6 space-y-4">
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="font-semibold text-success mb-3">✓ Foods to Emphasize</h3>
-                    <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Calcium-rich foods:</strong> Dairy, fortified plant milk, leafy greens (bone health)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Phytoestrogen sources:</strong> Soy products, flaxseeds, whole grains</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Omega-3 fatty acids:</strong> Salmon, walnuts, chia seeds (heart health)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Vitamin D sources:</strong> Fatty fish, egg yolks, fortified foods</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Whole grains:</strong> Brown rice, quinoa, oats (energy & fiber)</span>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="font-semibold text-destructive mb-3">✗ Foods to Limit</h3>
-                    <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Caffeine and alcohol (may trigger hot flashes)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Spicy foods (can worsen hot flashes)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>High-sodium foods (blood pressure concerns)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Processed and sugary foods (weight management)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Excessive red meat (heart health)</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="bg-muted/30 p-4 rounded-lg">
-                  <h4 className="font-semibold mb-3">Sample Daily Menu</h4>
-                  <div className="grid md:grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="font-medium text-primary mb-1">Breakfast</p>
-                      <p className="text-muted-foreground">Greek yogurt with berries, walnuts, and ground flaxseed</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-primary mb-1">Lunch</p>
-                      <p className="text-muted-foreground">Grilled salmon with quinoa and steamed broccoli</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-primary mb-1">Dinner</p>
-                      <p className="text-muted-foreground">Tofu stir-fry with vegetables and brown rice</p>
-                    </div>
-                  </div>
-                </div>
+                <ul className="space-y-3 text-sm text-muted-foreground">
+                  {recommendations.dietary.map((item: string, idx: number) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-success">•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </Card>
             </section>
 
@@ -444,54 +447,17 @@ const MenopausePrediction = () => {
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-primary flex items-center justify-center">
                   <span className="text-white font-bold">2</span>
                 </div>
-                Exercise & Physical Activity
+                Exercise Recommendations
               </h2>
-              <Card className="p-6 space-y-4">
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="font-semibold mb-3">Weight-Bearing Exercise (4-5x/week)</h3>
-                    <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Walking:</strong> 30-45 minutes daily (bone health)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Dancing:</strong> Fun and effective</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Stair climbing:</strong> 15-20 minutes</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Low-impact aerobics:</strong> Joint-friendly option</span>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="font-semibold mb-3">Strength & Flexibility (3x/week)</h3>
-                    <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Resistance training:</strong> Light weights or bands</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Yoga:</strong> Improves flexibility and reduces stress</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Tai Chi:</strong> Balance and mindfulness</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Pilates:</strong> Core strength</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
+              <Card className="p-6">
+                <ul className="space-y-3 text-sm text-muted-foreground">
+                  {recommendations.exercise.map((item: string, idx: number) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-primary">•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </Card>
             </section>
 
@@ -500,54 +466,17 @@ const MenopausePrediction = () => {
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-secondary to-accent flex items-center justify-center">
                   <span className="text-white font-bold">3</span>
                 </div>
-                Lifestyle & Symptom Management
+                Lifestyle Modifications
               </h2>
               <Card className="p-6">
-                <div className="space-y-4">
-                  <div className="bg-muted/30 p-4 rounded-lg">
-                    <h4 className="font-semibold mb-2 text-primary">For Hot Flashes & Night Sweats:</h4>
-                    <ul className="space-y-1 text-sm text-muted-foreground">
-                      <li>• Dress in layers you can remove easily</li>
-                      <li>• Keep your bedroom cool (60-65°F)</li>
-                      <li>• Use breathable, moisture-wicking fabrics</li>
-                      <li>• Practice deep breathing exercises</li>
-                      <li>• Avoid triggers: spicy food, hot drinks, alcohol</li>
-                    </ul>
-                  </div>
-
-                  <div className="bg-muted/30 p-4 rounded-lg">
-                    <h4 className="font-semibold mb-2 text-secondary">For Sleep Issues:</h4>
-                    <ul className="space-y-1 text-sm text-muted-foreground">
-                      <li>• Maintain consistent sleep schedule</li>
-                      <li>• Create relaxing bedtime routine</li>
-                      <li>• Limit screen time before bed</li>
-                      <li>• Consider melatonin (consult doctor first)</li>
-                      <li>• Practice meditation or progressive relaxation</li>
-                    </ul>
-                  </div>
-
-                  <div className="bg-muted/30 p-4 rounded-lg">
-                    <h4 className="font-semibold mb-2 text-accent">For Mood & Mental Health:</h4>
-                    <ul className="space-y-1 text-sm text-muted-foreground">
-                      <li>• Stay socially connected with friends and family</li>
-                      <li>• Consider therapy or support groups</li>
-                      <li>• Practice stress-reduction techniques (meditation, mindfulness)</li>
-                      <li>• Maintain regular exercise routine</li>
-                      <li>• Don't hesitate to discuss antidepressants with your doctor if needed</li>
-                    </ul>
-                  </div>
-
-                  <div className="bg-muted/30 p-4 rounded-lg">
-                    <h4 className="font-semibold mb-2 text-primary">Additional Recommendations:</h4>
-                    <ul className="space-y-1 text-sm text-muted-foreground">
-                      <li>• <strong>Bone health:</strong> Get bone density test (DEXA scan)</li>
-                      <li>• <strong>Heart health:</strong> Regular cardiovascular check-ups</li>
-                      <li>• <strong>Vaginal health:</strong> Use water-based lubricants; consider vaginal estrogen</li>
-                      <li>• <strong>Kegel exercises:</strong> Prevent urinary incontinence</li>
-                      <li>• <strong>Regular check-ups:</strong> Annual mammograms and pelvic exams</li>
-                    </ul>
-                  </div>
-                </div>
+                <ul className="space-y-3 text-sm text-muted-foreground">
+                  {recommendations.lifestyle.map((item: string, idx: number) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-accent">•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </Card>
             </section>
 
@@ -555,17 +484,12 @@ const MenopausePrediction = () => {
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-6 w-6 text-primary flex-shrink-0 mt-1" />
                 <div>
-                  <h3 className="font-semibold text-lg mb-2">When to See a Doctor</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-3">
-                    While menopause is natural, certain symptoms warrant professional attention. Consult your healthcare 
-                    provider for personalized treatment options, which may include:
+                  <h3 className="font-semibold text-lg mb-2">Important Reminder</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    These recommendations are general guidelines. For a personalized management plan, please consult with a 
+                    healthcare provider or menopause specialist. They may recommend hormone therapy, specific interventions, 
+                    or additional tests based on your individual needs and medical history.
                   </p>
-                  <ul className="text-sm text-muted-foreground space-y-1">
-                    <li>• Hormone therapy (HRT) - discuss risks and benefits</li>
-                    <li>• Non-hormonal medications for hot flashes</li>
-                    <li>• Vaginal estrogen for local symptoms</li>
-                    <li>• Bone-strengthening medications if needed</li>
-                  </ul>
                 </div>
               </div>
             </Card>

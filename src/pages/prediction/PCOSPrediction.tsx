@@ -7,16 +7,19 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, ArrowRight, Activity, AlertCircle, Check } from "lucide-react";
+import { ArrowLeft, ArrowRight, Activity, AlertCircle, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Bar, Radar } from "recharts";
 import { BarChart, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { supabase } from "@/integrations/supabase/client";
 
 const PCOSPrediction = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState<"intro" | "questionnaire" | "results" | "recommendations">("intro");
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [predictionResults, setPredictionResults] = useState<any>(null);
 
   const questions = [
     { id: "age", question: "What is your age?", type: "number", placeholder: "Enter your age" },
@@ -35,7 +38,7 @@ const PCOSPrediction = () => {
     setAnswers({ ...answers, [questions[currentQuestion].id]: value });
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (!answers[questions[currentQuestion].id]) {
       toast.error("Please answer the current question");
       return;
@@ -44,8 +47,35 @@ const PCOSPrediction = () => {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
     } else {
-      // All questions answered, show results
-      setStep("results");
+      // All questions answered, call backend API
+      setIsLoading(true);
+      try {
+        // Transform answers to match backend expectations
+        const transformedAnswers = {
+          irregularPeriods: answers.cycle_length === "Irregular" || answers.cycle_length === ">35 days" ? "yes" : "no",
+          weightGain: answers.weight_gain === "Yes, significant" || answers.weight_gain === "Yes, mild" ? "yes" : "no",
+          acne: answers.acne === "Frequently" || answers.acne === "Always" || answers.acne === "Sometimes" ? "yes" : "no",
+          hairGrowth: answers.facial_hair === "Moderate" || answers.facial_hair === "Severe" ? "yes" : "no",
+          hairLoss: answers.hair_loss === "Moderate" || answers.hair_loss === "Severe" ? "yes" : "no",
+          darkPatches: "no", // Not collected in current questionnaire
+          familyHistory: "no", // Not collected in current questionnaire
+        };
+
+        const { data, error } = await supabase.functions.invoke('predict-pcos', {
+          body: { answers: transformedAnswers }
+        });
+
+        if (error) throw error;
+
+        setPredictionResults(data);
+        setStep("results");
+        toast.success("Prediction completed successfully!");
+      } catch (error) {
+        console.error('Prediction error:', error);
+        toast.error("Failed to generate prediction. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -214,9 +244,18 @@ const PCOSPrediction = () => {
                     Previous
                   </Button>
                 )}
-                <Button onClick={handleNext} className="flex-1 gradient-primary" size="lg">
-                  {currentQuestion === questions.length - 1 ? "Get Results" : "Next"}
-                  <ArrowRight className="ml-2 h-4 w-4" />
+                <Button onClick={handleNext} className="flex-1 gradient-primary" size="lg" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      {currentQuestion === questions.length - 1 ? "Get Results" : "Next"}
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -227,6 +266,16 @@ const PCOSPrediction = () => {
   }
 
   if (step === "results") {
+    if (!predictionResults) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      );
+    }
+
+    const { riskScore, riskLevel, confidence, factors, symptomAnalysis } = predictionResults;
+    
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50">
         <DashboardHeader />
@@ -243,10 +292,10 @@ const PCOSPrediction = () => {
             </div>
 
             <div className="grid md:grid-cols-3 gap-6 mb-8">
-              <Card className={`p-6 text-center ${riskLevel === "High" ? "border-destructive" : riskLevel === "Moderate" ? "border-primary" : "border-success"}`}>
+              <Card className={`p-6 text-center ${riskLevel === "high" ? "border-destructive" : riskLevel === "moderate" ? "border-primary" : "border-success"}`}>
                 <div className="text-sm font-medium text-muted-foreground mb-2">Risk Level</div>
-                <div className={`text-4xl font-bold ${riskLevel === "High" ? "text-destructive" : riskLevel === "Moderate" ? "text-primary" : "text-success"}`}>
-                  {riskLevel}
+                <div className={`text-4xl font-bold ${riskLevel === "high" ? "text-destructive" : riskLevel === "moderate" ? "text-primary" : "text-success"}`}>
+                  {riskLevel.charAt(0).toUpperCase() + riskLevel.slice(1)}
                 </div>
               </Card>
 
@@ -257,7 +306,7 @@ const PCOSPrediction = () => {
 
               <Card className="p-6 text-center border-accent">
                 <div className="text-sm font-medium text-muted-foreground mb-2">Confidence</div>
-                <div className="text-4xl font-bold text-accent">87%</div>
+                <div className="text-4xl font-bold text-accent">{confidence}%</div>
               </Card>
             </div>
 
@@ -265,11 +314,11 @@ const PCOSPrediction = () => {
               <Card className="p-6">
                 <h3 className="text-xl font-semibold mb-4">Symptom Analysis</h3>
                 <ResponsiveContainer width="100%" height={300}>
-                  <RadarChart data={symptomData}>
+                  <RadarChart data={symptomAnalysis}>
                     <PolarGrid stroke="#f472b6" />
-                    <PolarAngleAxis dataKey="symptom" tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <PolarAngleAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 12 }} />
                     <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fill: '#64748b' }} />
-                    <Radar name="Symptom Severity" dataKey="value" stroke="#ec4899" fill="#ec4899" fillOpacity={0.6} />
+                    <Radar name="Symptom Severity" dataKey="severity" stroke="#ec4899" fill="#ec4899" fillOpacity={0.6} />
                     <Tooltip />
                   </RadarChart>
                 </ResponsiveContainer>
@@ -278,12 +327,12 @@ const PCOSPrediction = () => {
               <Card className="p-6">
                 <h3 className="text-xl font-semibold mb-4">Contributing Factors</h3>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={factorData}>
+                  <BarChart data={factors}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="factor" tick={{ fill: '#64748b', fontSize: 12 }} />
+                    <XAxis dataKey="factor" tick={{ fill: '#64748b', fontSize: 11 }} angle={-15} textAnchor="end" height={80} />
                     <YAxis tick={{ fill: '#64748b' }} />
                     <Tooltip />
-                    <Bar dataKey="contribution" fill="#c084fc" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="score" fill="#c084fc" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </Card>
@@ -295,7 +344,7 @@ const PCOSPrediction = () => {
                 What These Results Mean
               </h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Your assessment indicates a {riskLevel.toLowerCase()} risk for PCOS. This doesn't mean you definitely have PCOS, 
+                Your assessment indicates a {riskLevel} risk for PCOS. This doesn't mean you definitely have PCOS, 
                 but it suggests you should discuss these symptoms with a healthcare provider. Early detection and management 
                 can help prevent complications and improve quality of life.
               </p>
@@ -318,6 +367,24 @@ const PCOSPrediction = () => {
   // Recommendations step
   const bmi = answers.weight && answers.height ? 
     (parseFloat(answers.weight) / Math.pow(parseFloat(answers.height) / 100, 2)).toFixed(1) : null;
+
+  const recommendations = predictionResults?.recommendations || {
+    dietary: [
+      'Focus on whole foods and reduce processed foods',
+      'Include more fiber-rich foods',
+      'Limit sugar and refined carbohydrates',
+    ],
+    exercise: [
+      'Aim for 150 minutes of moderate exercise per week',
+      'Include both cardio and strength training',
+      'Try yoga or meditation for stress management',
+    ],
+    lifestyle: [
+      'Maintain a consistent sleep schedule',
+      'Manage stress through relaxation techniques',
+      'Track your menstrual cycle',
+    ],
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-pink-50">
@@ -359,71 +426,24 @@ const PCOSPrediction = () => {
                   <div className="space-y-3">
                     <h3 className="font-semibold text-success">✓ Foods to Include</h3>
                     <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Leafy greens:</strong> Spinach, kale, Swiss chard (high in antioxidants)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Fatty fish:</strong> Salmon, mackerel, sardines (omega-3 fatty acids)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Whole grains:</strong> Quinoa, brown rice, oats (low glycemic index)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Nuts and seeds:</strong> Almonds, flaxseeds, chia seeds</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-success">•</span>
-                        <span><strong>Berries:</strong> Blueberries, strawberries (anti-inflammatory)</span>
-                      </li>
+                      {recommendations.dietary.slice(0, 5).map((item: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-success">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
                     </ul>
                   </div>
-
                   <div className="space-y-3">
-                    <h3 className="font-semibold text-destructive">✗ Foods to Limit</h3>
+                    <h3 className="font-semibold text-success">Exercise Tips</h3>
                     <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Refined carbohydrates (white bread, pasta)</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Sugary drinks and desserts</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Processed and fried foods</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Red and processed meats</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-destructive">•</span>
-                        <span>Excessive dairy products</span>
-                      </li>
+                      {recommendations.exercise.map((item: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-success">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
                     </ul>
-                  </div>
-                </div>
-
-                <div className="bg-muted/30 p-4 rounded-lg mt-4">
-                  <h4 className="font-semibold mb-2">Sample Day Menu</h4>
-                  <div className="grid md:grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="font-medium text-primary mb-1">Breakfast</p>
-                      <p className="text-muted-foreground">Oatmeal with berries, chia seeds, and cinnamon</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-primary mb-1">Lunch</p>
-                      <p className="text-muted-foreground">Grilled salmon with quinoa and roasted vegetables</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-primary mb-1">Dinner</p>
-                      <p className="text-muted-foreground">Chicken stir-fry with brown rice and lots of veggies</p>
-                    </div>
                   </div>
                 </div>
               </Card>
@@ -434,98 +454,16 @@ const PCOSPrediction = () => {
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent to-primary flex items-center justify-center">
                   <span className="text-white font-bold">2</span>
                 </div>
-                Exercise Plan
-              </h2>
-              <Card className="p-6 space-y-4">
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="font-semibold mb-3">Cardio (4-5x per week)</h3>
-                    <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Brisk walking:</strong> 30-45 minutes daily</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Swimming:</strong> 30 minutes, 3x per week</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Cycling:</strong> 20-30 minutes</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-primary">•</span>
-                        <span><strong>Dancing:</strong> Fun cardio alternative</span>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="font-semibold mb-3">Strength Training (2-3x per week)</h3>
-                    <ul className="space-y-2 text-sm text-muted-foreground">
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Bodyweight exercises:</strong> Squats, lunges, push-ups</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Resistance bands:</strong> Full body workout</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Light weights:</strong> 2-5 lbs for beginners</span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="text-secondary">•</span>
-                        <span><strong>Core exercises:</strong> Planks, crunches</span>
-                      </li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="bg-accent/10 p-4 rounded-lg">
-                  <h4 className="font-semibold mb-2 flex items-center gap-2 text-accent">
-                    <AlertCircle className="h-4 w-4" />
-                    Additional Activities
-                  </h4>
-                  <ul className="space-y-1 text-sm text-muted-foreground">
-                    <li>• Yoga or Pilates (2-3x per week) - excellent for stress management and hormonal balance</li>
-                    <li>• Meditation (10-15 minutes daily) - helps reduce cortisol levels</li>
-                    <li>• Adequate sleep (7-9 hours) - crucial for hormonal regulation</li>
-                  </ul>
-                </div>
-              </Card>
-            </section>
-
-            <section>
-              <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-secondary to-accent flex items-center justify-center">
-                  <span className="text-white font-bold">3</span>
-                </div>
                 Lifestyle Modifications
               </h2>
               <Card className="p-6">
                 <ul className="space-y-3 text-sm text-muted-foreground">
-                  <li className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg">
-                    <Check className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
-                    <span><strong>Stress management:</strong> Practice relaxation techniques, deep breathing, or mindfulness meditation</span>
-                  </li>
-                  <li className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg">
-                    <Check className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
-                    <span><strong>Regular sleep schedule:</strong> Maintain consistent sleep-wake times to support hormonal balance</span>
-                  </li>
-                  <li className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg">
-                    <Check className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
-                    <span><strong>Hydration:</strong> Drink 8-10 glasses of water daily</span>
-                  </li>
-                  <li className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg">
-                    <Check className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
-                    <span><strong>Avoid smoking and limit alcohol:</strong> Both can worsen PCOS symptoms</span>
-                  </li>
-                  <li className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg">
-                    <Check className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
-                    <span><strong>Regular check-ups:</strong> Monitor blood sugar, cholesterol, and hormone levels with your doctor</span>
-                  </li>
+                  {recommendations.lifestyle.map((item: string, idx: number) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-primary">•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
                 </ul>
               </Card>
             </section>
